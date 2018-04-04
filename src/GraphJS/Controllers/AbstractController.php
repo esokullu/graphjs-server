@@ -39,10 +39,14 @@ abstract class AbstractController extends   \Pho\Server\Rest\Controllers\Abstrac
 
     protected function fail(Response $response, string $message = ""): void
     {
-        parent::fail(
-            $response->addHeader("Access-Control-Allow-Credentials", "true"), 
-            $message
-        );
+        $method = $this->getWriteMethod();
+        $response
+                    ->addHeader("Access-Control-Allow-Credentials", "true")
+                    ->$method([
+                        "success" => false,
+                        "reason"   => $message
+                    ])
+                    ->end();
     }
     
     /**
@@ -65,11 +69,19 @@ abstract class AbstractController extends   \Pho\Server\Rest\Controllers\Abstrac
         return $id;
     }
 
-    protected function handleException(Response $response, \Exception $e): void
+    protected function handleException(Response $response, /*\Exception|\Error*/ $e): void
     {
         $this->fail($response, sprintf(
             "An exception occurred: %s",
             $e->getMessage()
         ));
+    }
+
+    public function setExceptionHandler(Response $response): self
+    {
+        @set_exception_handler(function(/*\Exception|\Error*/ $e) use ($response) {
+            $this->handleException($response, $e);
+        });
+        return $this;
     }
 }
