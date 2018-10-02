@@ -26,22 +26,43 @@ class Router extends \Pho\Server\Rest\Router
 
     private static $session;
 
-    public static function init2(Server $server, array $controllers, Kernel $kernel): void
+    public static function init2(Server $server, array $controllers, Kernel $kernel, string $cors): void
     {
         
         $server->use(
-            function (Request $request, Response $response, $next) use ($kernel) {
+            function (Request $request, Response $response, $next) use ($kernel, $cors) {
+                $response->addHeader('Access-Control-Allow-Methods', join(',', [
+                    'GET',
+                    'POST',
+                    'PUT',
+                    'DELETE',
+                    'OPTIONS',
+                    'PATCH',
+                    'HEAD',
+                ]));
+                $response->addHeader('Access-Control-Allow-Headers', join(',', [
+                    'Origin',
+                    'X-Requested-With',
+                    'Content-Type',
+                    'Accept',
+                    'Authorization',
+                ]));
                 $data = $request->getQueryParams();
-                if(isset($data["public_id"])&&!empty($data["public_id"])) {
-                    error_log("Public ID is: ".$data["public_id"]);
-                }
-                if($data["public_id"]!="16D58CF2-FD88-4A49-972B-6F60054BF023") {
-                    error_log("debug 1");
+                if(strtolower($data["public_id"])=="79982844-6a27-4b3b-b77f-419a79be0e10") {
                     $response->addHeader("Access-Control-Allow-Origin", "http://localhost:8080");   // cors
                 }
-                else {
-                    error_log("debug 2");
-                    $response->addHeader("Access-Control-Allow-Origin", "http://docs.graphjs.com");   // cors
+                else { 
+                    if(strpos($cors, ";")===false)
+                        $response->addHeader("Access-Control-Allow-Origin", $cors);   // cors
+                    else {
+                        $cors = explode(";",$cors);
+                        $origin = $request->getHeader("origin");
+                        if(is_array($origin)&&count($origin)==1&&in_array($origin[0], $cors))
+                            $response->addHeader("Access-Control-Allow-Origin", $origin[0]); 
+                        else
+                            $response->addHeader("Access-Control-Allow-Origin", $cors[0]); 
+                    }
+
                 }
                 $next();
             }
@@ -54,8 +75,12 @@ class Router extends \Pho\Server\Rest\Router
         self::initContent(...\func_get_args());
         self::initForum(...\func_get_args());
         self::initGroup(...\func_get_args());
-        
+        self::initFeed(...\func_get_args());
+        self::initAdministration(...\func_get_args());
+
     }
+
+    
 
     protected static function initSession(Server $server, array $controllers, Kernel $kernel): void
     {
@@ -69,6 +94,56 @@ class Router extends \Pho\Server\Rest\Router
                 //$response->addHeader("Access-Control-Allow-Origin", "http://localhost:8080");   // cors
                 //eval(\Psy\sh());
                 $next();
+            }
+        );
+    }
+
+    protected static function initAdministration(Server $server, array $controllers, Kernel $kernel): void
+    {
+
+        $server->get(
+            'getPendingComments', function (Request $request, Response $response) use ($controllers, $kernel) {
+                $controllers["administration"]->fetchAllPendingComments($request, $response, $kernel);
+            }
+        );
+
+        $server->get(
+            'deletePendingComment', function (Request $request, Response $response) use ($controllers, $kernel) {
+                $controllers["administration"]->disapprovePendingComment($request, $response, $kernel);
+            }
+        );
+
+        $server->get(
+            'approvePendingComment', function (Request $request, Response $response) use ($controllers, $kernel) {
+                $controllers["administration"]->approvePendingComment($request, $response, $kernel);
+            }
+        );
+
+        $server->get(
+            'setCommentModeration', function (Request $request, Response $response) use ($controllers, $kernel) {
+                $controllers["administration"]->setCommentModeration($request, $response, $kernel);
+            }
+        );
+
+        $server->get(
+            'setFounderPassword', function (Request $request, Response $response) use ($controllers, $kernel) {
+                $controllers["administration"]->setFounderPassword($request, $response, $kernel);
+            }
+        );
+
+        $server->get(
+            'getCommentModeration', function (Request $request, Response $response) use ($controllers, $kernel) {
+                $controllers["administration"]->getCommentModeration($request, $response, $kernel);
+            }
+        );
+    }
+
+    protected static function initFeed(Server $server, array $controllers, Kernel $kernel): void
+    {
+        $session = self::$session;
+        $server->get(
+            'generateFeedToken', function (Request $request, Response $response) use ($controllers, $kernel) {
+                $controllers["feed"]->generate($request, $response, $kernel);
             }
         );
     }
@@ -96,11 +171,29 @@ class Router extends \Pho\Server\Rest\Router
                 $controllers["authentication"]->whoami($request, $response, $session);
             }
         );
+        $server->get(
+            'resetPassword', function (Request $request, Response $response) use ($controllers) {
+                $controllers["authentication"]->reset($request, $response);
+            }
+        );
+        $server->get(
+            'verifyReset', function (Request $request, Response $response) use ($session, $kernel, $controllers) {
+                $controllers["authentication"]->verify($request, $response, $session, $kernel);
+            }
+        );
     }
 
     protected static function initMessaging(Server $server, array $controllers, Kernel $kernel): void
     {
         $session = self::$session;
+        
+
+        $server->get(
+            'sendAnonymousMessage', function (Request $request, Response $response) use ($session, $controllers, $kernel) {
+                $controllers["messaging"]->message($request, $response, $session, $kernel, true);
+            }
+        );
+
         $server->get(
             'sendMessage', function (Request $request, Response $response) use ($session, $controllers, $kernel) {
                 $controllers["messaging"]->message($request, $response, $session, $kernel);
@@ -226,6 +319,12 @@ class Router extends \Pho\Server\Rest\Router
                 $controllers["content"]->delComment($request, $response, $session, $kernel);
             }
         );
+        
+        $server->get(
+            'editComment', function (Request $request, Response $response) use ($controllers, $kernel, $session) {
+                $controllers["content"]->edit($request, $response, $session, $kernel);
+            }
+        );
 
         $server->get(
             'getComments', function (Request $request, Response $response) use ($controllers, $kernel) {
@@ -244,11 +343,48 @@ class Router extends \Pho\Server\Rest\Router
                 $controllers["content"]->fetchStarredContent($request, $response, $kernel);
             }
         );
+
+        $server->get(
+            'getPrivateContent', function (Request $request, Response $response) use ($controllers, $kernel, $session) {
+                $controllers["content"]->getPrivateContent($request, $response, $session, $kernel);
+            }
+        );
+
+        $server->get(
+            'addPrivateContent', function (Request $request, Response $response) use ($controllers, $kernel, $session) {
+                $controllers["content"]->addPrivateContent($request, $response, $session, $kernel);
+            }
+        );
+
+        $server->get(
+            'editPrivateContent', function (Request $request, Response $response) use ($controllers, $kernel, $session) {
+                $controllers["content"]->editPrivateContent($request, $response, $session, $kernel);
+            }
+        );
+
+        $server->get(
+            'deletePrivateContent', function (Request $request, Response $response) use ($controllers, $kernel, $session) {
+                $controllers["content"]->delPrivateContent($request, $response, $session, $kernel);
+            }
+        );
     }
 
     protected static function initForum( Server $server, array $controllers, Kernel $kernel): void
     {
         $session = self::$session;
+
+        $server->get(
+            'editForumPost', function (Request $request, Response $response) use ($controllers, $kernel, $session) {
+                $controllers["forum"]->edit($request, $response, $session, $kernel);
+            }
+        );
+        
+        $server->get(
+            'deleteForumPost', function (Request $request, Response $response) use ($controllers, $kernel, $session) {
+                $controllers["forum"]->delete($request, $response, $session, $kernel);
+            }
+        );
+
         $server->get(
             'startThread', function (Request $request, Response $response) use ($controllers, $kernel, $session) {
                 $controllers["forum"]->startThread($request, $response, $session, $kernel);
@@ -280,6 +416,12 @@ class Router extends \Pho\Server\Rest\Router
         $server->get(
             'createGroup', function (Request $request, Response $response) use ($controllers, $kernel, $session) {
                 $controllers["group"]->createGroup($request, $response, $session, $kernel);
+            }
+        );
+
+        $server->get(
+            'setGroup', function (Request $request, Response $response) use ($controllers, $kernel, $session) {
+                $controllers["group"]->setGroup($request, $response, $session, $kernel);
             }
         );
 

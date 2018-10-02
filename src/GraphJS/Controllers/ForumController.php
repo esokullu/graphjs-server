@@ -32,6 +32,46 @@ use Pho\Lib\Graph\TailNode;
  */
 class ForumController extends AbstractController
 {
+
+    public function delete(Request $request, Response $response, Session $session, Kernel $kernel)
+    {
+        if(is_null($id = $this->dependOnSession(...\func_get_args()))) {
+            return;
+        }
+        $data = $request->getQueryParams();
+        $v = new Validator($data);
+        $v->rule('required', ['id']);
+        if(!$v->validate()) {
+            $this->fail($response, "Entity ID unavailable.");
+            return;
+        }
+        $entity = $kernel->gs()->entity($data["id"]);
+        $deleted = [];
+        if($entity instanceof Thread) {
+            if($entity->edges()->in(Start::class)->current()->tail()->id()->toString()==$id) {
+                $deleted[] = (string) $entity->id();
+                // replies automatically deleted
+                $entity->destroy();
+                return $this->succeed($response, [
+                    "deleted" => $deleted
+                ]);
+            }
+            return $this->fail($response, "You are not the owner of this thread.");
+        }
+        elseif($entity instanceof Reply) {
+            if($entity->tail()->id()->toString()==$id) {
+                $deleted[] = (string) $entity->id();
+                $entity->destroy();
+                return $this->succeed($response, [
+                    "deleted" => $deleted
+                ]);
+            }
+            return $this->fail($response, "You are not the owner of this reply.");
+        }
+        
+        $this->fail($response, "The ID does not belong to a thread or reply.");
+    }
+
     /**
      * Start Forum Thread 
      * 
@@ -105,6 +145,34 @@ class ForumController extends AbstractController
         );
     }
 
+ 
+    public function edit(Request $request, Response $response, Session $session, Kernel $kernel)
+    {
+        if(is_null($id = $this->dependOnSession(...\func_get_args()))) {
+            return;
+        }
+        $data = $request->getQueryParams();
+        $v = new Validator($data);
+        $v->rule('required', ['id', 'content']);
+        if(!$v->validate()) {
+            $this->fail($response, "Message ID and Content are required.");
+            return;
+        }
+        $i = $kernel->gs()->node($id);
+        $entity = $kernel->gs()->entity($data["id"]);
+        if(!$entity instanceof Thread && !$entity instanceof Reply) {
+            $this->fail($response, "Incompatible entity type.");
+            return;
+        }
+        try {
+        $i->edit($entity)->setContent($data["content"]);
+        }
+     catch(\Exception $e) {
+        $this->fail($response, $e->getMessage());
+            return;
+     }
+     $this->succeed($response);
+    }
 
     /**
      * Get Threads
@@ -128,7 +196,7 @@ class ForumController extends AbstractController
             if($thing instanceof Thread) {
                 $contributors_x = [];
                 $contributors = array_map(
-                    function(TailNode /* actually User */ $u) : array 
+                    function(User $u) : array 
                 {
                         return [ 
                             $u->id()->toString() =>
@@ -142,8 +210,8 @@ class ForumController extends AbstractController
                                     ), CASE_LOWER
                                 )
                             ];
-                },array_map( function(Reply $r): TailNode {
-                    return $r->tail();
+                },array_map( function(Reply $r): User {
+                    return $r->tail()->node();
                 }, $thing->getReplies()));
                 foreach($contributors as $contributor) {
                     foreach($contributor as $k=>$v) {
@@ -198,6 +266,7 @@ class ForumController extends AbstractController
             "title" => $thread->getTitle(),
             "messages" => array_merge(
                 [[
+                    "id" => (string) $thread->id(),
                     "author" => (string) $thread->edges()->in()->current()->tail()->id(),
                     "content" => $thread->getContent(),
                     "timestamp" => (string) $thread->getCreateTime()
@@ -205,6 +274,7 @@ class ForumController extends AbstractController
                 array_map(
                     function ($obj): array {
                         return [
+                            "id" => (string) $obj->id(),
                             "author" => (string) $obj->tail()->id(),
                             "content" => $obj->getContent(),
                             "timestamp" => (string) $obj->getReplyTime()

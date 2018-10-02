@@ -1,0 +1,1 @@
+web: sleep 30 && php run.php --heroku yes
