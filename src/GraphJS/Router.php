@@ -26,6 +26,42 @@ class Router extends \Pho\Server\Rest\Router
 
     private static $session;
 
+    /**
+     * Expands CORS Urls
+     *
+     * The input is taken from the command line and expanded into 
+     * an array with all HTTP scheme combinations, as well as
+     * cleaned format.
+     * 
+     * @param string $cors
+     * @return array
+     */
+    protected static function expandCorsUrl(string $cors): array
+    {
+        $final = ["https://graphjs.com", "http://graphjs.com", "https://www.graphjs.com", "http://www.graphjs.com"];
+        if(strpos($cors, ";")===false) {
+            $urls = [0=>$cors];
+        }
+        else {
+            $urls = explode(";",$cors);
+        }
+        foreach($urls as $url) {
+            $parsed = parse_url($url);
+            if(count($parsed)==1&&isset($parsed["path"])) {
+                $final[] = "http://".$parsed["path"];
+                $final[] = "https://".$parsed["path"];
+            }
+            elseif(count($parsed)>=2&&isset($parsed["host"])) {
+                $final[] = "http://".$parsed["host"] . (isset($parsed["port"])?":{$parsed["port"]}":"");
+                $final[] = "https://".$parsed["host"] . (isset($parsed["port"])?":{$parsed["port"]}":"");
+            }
+            else {
+                error_log("skipping unknown format: ".$url." - parsed as: ".print_r($parsed, true));
+            }
+        }
+        return array_unique($final);
+    }
+
     public static function init2(Server $server, array $controllers, Kernel $kernel, string $cors): void
     {
         
@@ -52,17 +88,13 @@ class Router extends \Pho\Server\Rest\Router
                     $response->addHeader("Access-Control-Allow-Origin", "http://localhost:8080");   // cors
                 }
                 else { 
-                    if(strpos($cors, ";")===false)
-                        $response->addHeader("Access-Control-Allow-Origin", $cors);   // cors
-                    else {
-                        $cors = explode(";",$cors);
-                        $origin = $request->getHeader("origin");
-                        if(is_array($origin)&&count($origin)==1&&in_array($origin[0], $cors))
-                            $response->addHeader("Access-Control-Allow-Origin", $origin[0]); 
-                        else
-                            $response->addHeader("Access-Control-Allow-Origin", $cors[0]); 
-                    }
-
+                    $cors = self::expandCorsUrl($cors);
+                    $origin = $request->getHeader("origin");
+                    //error_log(print_r($origin, true));
+                    if(is_array($origin)&&count($origin)==1&&in_array($origin[0], $cors))
+                        $response->addHeader("Access-Control-Allow-Origin", $origin[0]); 
+                    else
+                        $response->addHeader("Access-Control-Allow-Origin", $cors[0]); 
                 }
                 $next();
             }
@@ -101,6 +133,12 @@ class Router extends \Pho\Server\Rest\Router
     protected static function initAdministration(Server $server, array $controllers, Kernel $kernel): void
     {
 
+        $server->get(
+            'deleteMember', function (Request $request, Response $response) use ($controllers, $kernel) {
+                $controllers["administration"]->deleteMember($request, $response, $kernel);
+            }
+        );
+        
         $server->get(
             'getPendingComments', function (Request $request, Response $response) use ($controllers, $kernel) {
                 $controllers["administration"]->fetchAllPendingComments($request, $response, $kernel);

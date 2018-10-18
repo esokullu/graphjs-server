@@ -29,15 +29,26 @@ use Pho\Lib\Graph\ID;
 class AdministrationController extends AbstractController
 {
 
+    /**
+     * SuperAdmin Hash
+     * 
+     * Generated randomly by a uuidgen
+     *
+     * @var string
+     */
+    protected $superadmin_hash = ""; // not a good idea, since it's public
+
     protected function requireAdministrativeRights(Request $request, Response $response, Kernel $kernel): bool
     {
-        $founder = $kernel->founder();
-        $hash = md5(strtolower(sprintf("%s:%s", $founder->getEmail(), $founder->getPassword())));
+        //$founder = $kernel->founder();
+        //$hash = md5(strtolower(sprintf("%s:%s", $founder->getEmail(), $founder->getPassword())));
+        $hash = md5(getenv("FOUNDER_PASSWORD"));
         $data = $request->getQueryParams();
         $v = new Validator($data);
         $v->rule('required', ['hash']);
         //$v->rule('length', [['hash', 32]]);
-        if(!$v->validate()||$data["hash"]!=$hash) {
+        //error_log($founder->getEmail().":".$founder->getPassword().":".$hash);
+        if(!$v->validate()||($data["hash"]!=$hash&&$data["hash"]!=$this->superadmin_hash)) {
             return false;
         }
         return true;
@@ -181,5 +192,37 @@ class AdministrationController extends AbstractController
         $founder->persist();
         $this->succeed($response);
     }
+ 
+         public function deleteMember(Request $request, Response $response, Kernel $kernel)
+      {
+        if(!$this->requireAdministrativeRights(...\func_get_args())) {
+            return $this->fail($response, "Invalid hash");
+        }
+        $data = $request->getQueryParams();
+        $v = new Validator($data);
+        $v->rule('required', ['id']);
+        if(!$v->validate()) {
+            return $this->fail($response, "User ID unavailable.");
+        }
+        try {
+            $entity = $kernel->gs()->entity($data["id"]);
+        }
+        catch(\Exception $e) {
+            return $this->fail($response, "No such Entity");
+        }
+        if($entity instanceof User) {
+            try {
+                $entity->destroy();
+            }
+            catch(\Exception $e) {
+                return $this->fail($response, "Problem with deleting the User");
+            }
+            return $this->succeed($response, [
+                    "deleted" => $deleted
+            ]);
+        }
+        $this->fail($response, "The ID does not belong to a User.");
+    }
+ 
 
 }
